@@ -19,11 +19,15 @@ package org.apache.spark.ml.regression
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.ml.PredictorParams
-import org.apache.spark.ml.linalg.Vector
+import org.apache.spark.ml.linalg.{BLAS, Vector, Vectors}
 import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.param.shared._
 import org.apache.spark.ml.util.{DefaultParamsWritable, MLWritable, MLWriter}
 import org.apache.spark.sql.Dataset
+import breeze.linalg.{DenseVector => BDV}
+import breeze.optimize.DiffFunction
+import org.apache.spark.ml.feature.Instance
+import org.apache.spark.rdd.RDD
 
 
 trait SampleNonLinearRegressionParams extends PredictorParams
@@ -60,4 +64,68 @@ class SampleNonLinearRegressionModel(override val uid: String, val coefficients:
   override def copy(extra: ParamMap): SampleNonLinearRegressionModel = {
     throw new UnsupportedOperationException
   }
+
+  private class LeastSquaresCostFun(instances: RDD[Instance])
+    extends DiffFunction[BDV[Double]] {
+
+    override def calculate(coefficients: BDV[Double]): (Double, BDV[Double]) = {
+      throw new UnsupportedOperationException
+    }
+
+  }
+
+  private class LeastSquaresAggregator(coefficients: Vector)
+    extends Serializable {
+
+    private var totalCnt: Long = 0L
+    private var weightSum: Double = 0.0
+    private var lossSum = 0.0
+
+    private val dim = coefficients.size
+    private val gradientSumArray = Array.ofDim[Double](dim)
+
+    /**
+      *
+      * @param instance
+      * @return
+      */
+    def add(instance: Instance): this.type = {
+      instance match {
+        case Instance(label, weight, features) =>
+          if (weight == 0.0) return this
+
+          // TODO replace 1 with function value
+          val diff = 1 - label
+          if (diff != 0) {
+            val localGradientSumArray = gradientSumArray
+            features.foreachActive { (index, value) =>
+              if (value != 0.0) {
+                localGradientSumArray(index) += weight * diff * value
+              }
+            }
+            lossSum += weight * diff * diff / 2.0
+          }
+          totalCnt += 1
+          weightSum += weight
+          this
+      }
+    }
+
+    def merge(other: LeastSquaresAggregator): this.type = {
+      throw new UnsupportedOperationException
+    }
+
+    def count: Long = totalCnt
+
+    def loss: Double = {
+      lossSum / weightSum
+    }
+
+    def gradient: Vector = {
+      val result = Vectors.dense(gradientSumArray.clone())
+      BLAS.scal(1.0 / weightSum, result)
+      result
+    }
+  }
+
 }
