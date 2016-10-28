@@ -20,7 +20,8 @@ package org.apache.spark.ml.regression
 import java.lang.Math.exp
 
 import breeze.linalg.{DenseVector => BDV}
-import breeze.optimize.DiffFunction
+import breeze.optimize.{CachedDiffFunction, DiffFunction, LBFGS}
+import org.apache.spark.SparkException
 import org.apache.spark.internal.Logging
 import org.apache.spark.ml.PredictorParams
 import org.apache.spark.ml.feature.Instance
@@ -29,12 +30,16 @@ import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.param.shared._
 import org.apache.spark.ml.util._
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.Dataset
+import org.apache.spark.sql.{Dataset, Row}
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types.DoubleType
+import org.apache.spark.storage.StorageLevel
+
+import scala.collection.mutable
 
 
 trait SampleNonLinearRegressionParams extends PredictorParams
-  with HasMaxIter with HasTol with HasFitIntercept with HasStandardization
-  with HasWeightCol with HasSolver
+  with HasMaxIter with HasTol with HasWeightCol
 
 /**
   * Sample non-linear regression.
@@ -47,11 +52,61 @@ class SampleNonLinearRegression(override val uid: String)
 
   def this() = this(Identifiable.randomUID("sampleNonLinReg"))
 
-
   override def copy(extra: ParamMap): SampleNonLinearRegression = defaultCopy(extra)
 
+  def setMaxIter(value: Int): this.type = set(maxIter, value)
+
+  setDefault(maxIter -> 100)
+
+  def setTol(value: Double): this.type = set(tol, value)
+
+  setDefault(tol -> 1e-6)
+
+  def setWeightCol(value: String): this.type = set(weightCol, value)
+
   override protected def train(dataset: Dataset[_]): SampleNonLinearRegressionModel = {
-    throw new UnsupportedOperationException
+    val w = if (!isDefined(weightCol) || $(weightCol).isEmpty) lit(1.0) else col($(weightCol))
+    val instances: RDD[Instance] = dataset.select(
+      col($(labelCol)).cast(DoubleType), w, col($(featuresCol))).rdd.map {
+      case Row(label: Double, weight: Double, features: Vector) => Instance(label, weight, features)
+    }
+
+    // persists dataset if defined any storage level
+    val handlePersistence = dataset.rdd.getStorageLevel == StorageLevel.NONE
+    if (handlePersistence) instances.persist(StorageLevel.MEMORY_AND_DISK)
+
+    val costFunc = new LeastSquaresCostFunction(instances)
+    val optimizer = new LBFGS[BDV[Double]]($(maxIter), 10, $(tol))
+    // TODO remove the hardcode
+    val initialCoef = Vectors.zeros(6)
+    val states = optimizer.iterations(new CachedDiffFunction[BDV[Double]](costFunc),
+      initialCoef.asBreeze.toDenseVector)
+    val (coefficients, objectiveHistory) = {
+      val builder = mutable.ArrayBuilder.make[Double]
+      var state: optimizer.State = null
+      while (states.hasNext) {
+        state = states.next()
+        builder += state.adjustedValue
+      }
+
+      // checks is method failed
+      if (state == null) {
+        val msg = s"${optimizer.getClass.getName} failed."
+        logError(msg)
+        throw new SparkException(msg)
+      }
+
+      (Vectors.dense(state.x.toArray.clone()).compressed, builder.result)
+    }
+
+    if (handlePersistence) instances.unpersist()
+    val model = copyValues(new SampleNonLinearRegressionModel(uid, coefficients))
+    val (summaryModel: SampleNonLinearRegressionModel, predictionColName: String) =
+      model.findSummaryModelAndPredictionCol()
+
+    // TODO implement summary
+    val trainingSummary = new SampleNonLinearRegressionTrainingSummary()
+    model.setSummary(trainingSummary)
   }
 }
 
@@ -104,6 +159,17 @@ class SampleNonLinearRegressionModel(override val uid: String, val coefficients:
     with SampleNonLinearRegressionParams
     with MLWritable {
 
+  private var trainingSummary: Option[SampleNonLinearRegressionTrainingSummary] = None
+
+  def findSummaryModelAndPredictionCol(): (SampleNonLinearRegressionModel, String) = {
+    throw new UnsupportedOperationException
+  }
+
+  def setSummary(summary: SampleNonLinearRegressionTrainingSummary): this.type = {
+    this.trainingSummary = Some(summary)
+    this
+  }
+
   override def write: MLWriter = {
     throw new UnsupportedOperationException
   }
@@ -115,123 +181,117 @@ class SampleNonLinearRegressionModel(override val uid: String, val coefficients:
   override def copy(extra: ParamMap): SampleNonLinearRegressionModel = {
     throw new UnsupportedOperationException
   }
+}
 
-  private class LeastSquaresCostFun(instances: RDD[Instance])
-    extends DiffFunction[BDV[Double]] {
+/**
+  * LeastSquaresAggregator computes the gradient and loss for a Least-squared loss function.
+  *
+  * @param coefficients coefficients vector
+  */
+private class LeastSquaresAggregator(coefficients: Vector)
+  extends Serializable {
 
-    override def calculate(coefficients: BDV[Double]): (Double, BDV[Double]) = {
-      throw new UnsupportedOperationException
-    }
+  private var totalCnt: Long = 0L
+  private var weightSum: Double = 0.0
+  private var lossSum = 0.0
 
-  }
+  private val dim = coefficients.size
+  private val gradientSumArray = Array.ofDim[Double](dim)
 
   /**
-    * LeastSquaresAggregator computes the gradient and loss for a Least-squared loss function.
+    * Evaluates instance error and updates counters.
     *
-    * @param coefficients coefficients vector
+    * @param instance instance
+    * @return this object
     */
-  private class LeastSquaresAggregator(coefficients: Vector)
-    extends Serializable {
+  def add(instance: Instance): this.type = {
+    instance match {
+      case Instance(label, weight, features) =>
+        if (weight == 0.0) return this
 
-    private var totalCnt: Long = 0L
-    private var weightSum: Double = 0.0
-    private var lossSum = 0.0
-
-    private val dim = coefficients.size
-    private val gradientSumArray = Array.ofDim[Double](dim)
-
-    /**
-      * Evaluates instance error and updates counters.
-      *
-      * @param instance instance
-      * @return this object
-      */
-    def add(instance: Instance): this.type = {
-      instance match {
-        case Instance(label, weight, features) =>
-          if (weight == 0.0) return this
-
-          val diff = SampleNonLinearRegression.functionValue(coefficients, features) - label
-          if (diff != 0) {
-            val localGradientSumArray = gradientSumArray
-            val gradientArray = SampleNonLinearRegression.firstPartialDerivative(coefficients, features)
-            gradientArray.zipWithIndex.foreach {
-              case (x: Double, i: Int) => localGradientSumArray(i) += x * weight
-            }
-            // squared error accumulator
-            lossSum += weight * diff * diff / 2.0
+        val diff = SampleNonLinearRegression.functionValue(coefficients, features) - label
+        if (diff != 0) {
+          val localGradientSumArray = gradientSumArray
+          val gradientArray = SampleNonLinearRegression.firstPartialDerivative(coefficients, features)
+          gradientArray.zipWithIndex.foreach {
+            case (x: Double, i: Int) => localGradientSumArray(i) += x * weight
           }
-          totalCnt += 1
-          weightSum += weight
-          this
-      }
-    }
-
-    /**
-      * Merges another LeastSquaresAggregator and updates the loss and gradient of the objective function.
-      *
-      * @param other object to be merged
-      * @return this object
-      */
-    def merge(other: LeastSquaresAggregator): this.type = {
-      require(dim == other.dim, s"Dimensions mismatch when merging with another " +
-        s"LeastSquaresAggregator. Expecting $dim but got ${other.dim}.")
-
-      if (other.weightSum != 0) {
-        totalCnt += other.totalCnt
-        weightSum += other.weightSum
-        lossSum += other.lossSum
-
-        var i = 0
-        val localThisGradientSumArray = this.gradientSumArray
-        val localOtherGradientSumArray = other.gradientSumArray
-        while (i < dim) {
-          localThisGradientSumArray(i) += localOtherGradientSumArray(i)
-          i += 1
+          // squared error accumulator
+          lossSum += weight * diff * diff / 2.0
         }
-      }
-      this
-    }
-
-    /**
-      * The number of processed instances.
-      */
-    def count: Long = totalCnt
-
-    /**
-      * Accumulated loss
-      */
-    def loss: Double = {
-      lossSum / weightSum
-    }
-
-    /**
-      * Accumulated gradient
-      */
-    def gradient: Vector = {
-      val result = Vectors.dense(gradientSumArray.clone())
-      BLAS.scal(1.0 / weightSum, result)
-      result
+        totalCnt += 1
+        weightSum += weight
+        this
     }
   }
 
   /**
-    * LeastSquaresCostFun implements Breeze's DiffFunction[T] for Least Squares cost.
-    * It's used in Breeze's convex optimization routines.
+    * Merges another LeastSquaresAggregator and updates the loss and gradient of the objective function.
+    *
+    * @param other object to be merged
+    * @return this object
     */
-  private class LeastSquaresCostFunction(instances: RDD[Instance]) extends DiffFunction[BDV[Double]] {
-    override def calculate(coefficients: BDV[Double]): (Double, BDV[Double]) = {
-      val coeffs = Vectors.fromBreeze(coefficients)
+  def merge(other: LeastSquaresAggregator): this.type = {
+    require(dim == other.dim, s"Dimensions mismatch when merging with another " +
+      s"LeastSquaresAggregator. Expecting $dim but got ${other.dim}.")
 
-      val aggregator = {
-        val mapOperator = (c: LeastSquaresAggregator, instance: Instance) => c.add(instance)
-        val reduceOperator = (c1: LeastSquaresAggregator, c2: LeastSquaresAggregator) => c1.merge(c2)
-        instances.treeAggregate(new LeastSquaresAggregator(coeffs))(mapOperator, reduceOperator)
+    if (other.weightSum != 0) {
+      totalCnt += other.totalCnt
+      weightSum += other.weightSum
+      lossSum += other.lossSum
+
+      var i = 0
+      val localThisGradientSumArray = this.gradientSumArray
+      val localOtherGradientSumArray = other.gradientSumArray
+      while (i < dim) {
+        localThisGradientSumArray(i) += localOtherGradientSumArray(i)
+        i += 1
       }
-
-      val totalGradient = aggregator.gradient.toArray
-      (aggregator.loss, new BDV[Double](totalGradient))
     }
+    this
   }
+
+  /**
+    * The number of processed instances.
+    */
+  def count: Long = totalCnt
+
+  /**
+    * Accumulated loss
+    */
+  def loss: Double = {
+    lossSum / weightSum
+  }
+
+  /**
+    * Accumulated gradient
+    */
+  def gradient: Vector = {
+    val result = Vectors.dense(gradientSumArray.clone())
+    BLAS.scal(1.0 / weightSum, result)
+    result
+  }
+}
+
+/**
+  * LeastSquaresCostFun implements Breeze's DiffFunction[T] for Least Squares cost.
+  * It's used in Breeze's convex optimization routines.
+  */
+private class LeastSquaresCostFunction(instances: RDD[Instance]) extends DiffFunction[BDV[Double]] {
+  override def calculate(coefficients: BDV[Double]): (Double, BDV[Double]) = {
+    val coeffs = Vectors.fromBreeze(coefficients)
+
+    val aggregator = {
+      val mapOperator = (c: LeastSquaresAggregator, instance: Instance) => c.add(instance)
+      val reduceOperator = (c1: LeastSquaresAggregator, c2: LeastSquaresAggregator) => c1.merge(c2)
+      instances.treeAggregate(new LeastSquaresAggregator(coeffs))(mapOperator, reduceOperator)
+    }
+
+    val totalGradient = aggregator.gradient.toArray
+    (aggregator.loss, new BDV[Double](totalGradient))
+  }
+}
+
+class SampleNonLinearRegressionTrainingSummary() {
 
 }
