@@ -21,6 +21,7 @@ import java.lang.Math.exp
 
 import breeze.linalg.{DenseVector => BDV}
 import breeze.optimize.{CachedDiffFunction, DiffFunction, LBFGS}
+import org.apache.hadoop.fs.Path
 import org.apache.spark.SparkException
 import org.apache.spark.internal.Logging
 import org.apache.spark.ml.PredictorParams
@@ -29,8 +30,10 @@ import org.apache.spark.ml.linalg.{BLAS, Vector, Vectors}
 import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.param.shared._
 import org.apache.spark.ml.util._
+import org.apache.spark.mllib.evaluation.RegressionMetrics
+import org.apache.spark.mllib.util.MLUtils
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{Dataset, Row}
+import org.apache.spark.sql.{DataFrame, Dataset, Row}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.DoubleType
 import org.apache.spark.storage.StorageLevel
@@ -104,8 +107,9 @@ class SampleNonLinearRegression(override val uid: String)
     val (summaryModel: SampleNonLinearRegressionModel, predictionColName: String) =
       model.findSummaryModelAndPredictionCol()
 
-    // TODO implement summary
-    val trainingSummary = new SampleNonLinearRegressionTrainingSummary()
+    val trainingSummary = new SampleNonLinearRegressionSummary(summaryModel.transform(dataset),
+      predictionColName, $(labelCol), $(featuresCol), model, Array(0D)
+    )
     model.setSummary(trainingSummary)
   }
 }
@@ -159,28 +163,72 @@ class SampleNonLinearRegressionModel(override val uid: String, val coefficients:
     with SampleNonLinearRegressionParams
     with MLWritable {
 
-  private var trainingSummary: Option[SampleNonLinearRegressionTrainingSummary] = None
+  private var trainingSummary: Option[SampleNonLinearRegressionSummary] = None
 
-  def findSummaryModelAndPredictionCol(): (SampleNonLinearRegressionModel, String) = {
-    throw new UnsupportedOperationException
-  }
+  override val numFeatures: Int = coefficients.size
 
-  def setSummary(summary: SampleNonLinearRegressionTrainingSummary): this.type = {
+  def setSummary(summary: SampleNonLinearRegressionSummary): this.type = {
     this.trainingSummary = Some(summary)
     this
   }
 
-  override def write: MLWriter = {
-    throw new UnsupportedOperationException
+  def summary: SampleNonLinearRegressionSummary = trainingSummary.getOrElse {
+    throw new SparkException("No training summary available for this model")
   }
 
-  override protected def predict(features: Vector): Double = {
-    throw new UnsupportedOperationException
+  def hasSummary: Boolean = trainingSummary.isDefined
+
+  def findSummaryModelAndPredictionCol(): (SampleNonLinearRegressionModel, String) = {
+    $(predictionCol) match {
+      case "" =>
+        val predictionColName = "prediction_" + java.util.UUID.randomUUID.toString
+        (copy(ParamMap.empty).setPredictionCol(predictionColName), predictionColName)
+      case p => (this, p)
+    }
   }
+
+  override def write: MLWriter = new SampleNonLinearRegressionModel.SampleNonLinearModelWriter(this)
+
+  override protected def predict(features: Vector): Double = SampleNonLinearRegression.functionValue(coefficients, features)
 
   override def copy(extra: ParamMap): SampleNonLinearRegressionModel = {
-    throw new UnsupportedOperationException
+    val newModel = copyValues(new SampleNonLinearRegressionModel(uid, coefficients), extra)
+    if (trainingSummary.isDefined) newModel.setSummary(trainingSummary.get)
+    newModel.setParent(parent)
   }
+}
+
+object SampleNonLinearRegressionModel extends MLReadable[SampleNonLinearRegressionModel] {
+
+  class SampleNonLinearModelWriter(instance: SampleNonLinearRegressionModel)
+    extends MLWriter with Logging {
+
+    private case class Data(coefficients: Vector)
+
+    override protected def saveImpl(path: String): Unit = {
+      DefaultParamsWriter.saveMetadata(instance, path, sc)
+      val data = Data(instance.coefficients)
+      val dataPath = new Path(path, "data").toString
+      sparkSession.createDataFrame(Seq(data)).repartition(1).write.parquet(dataPath)
+    }
+  }
+
+  private class SampleNonLinearModelReader extends MLReader[SampleNonLinearRegressionModel] {
+
+    private val className = classOf[SampleNonLinearRegressionModel].getName
+
+    override def load(path: String): SampleNonLinearRegressionModel = {
+      val metadata = DefaultParamsReader.loadMetadata(path, sc, className)
+      val dataPath = new Path(path, "data").toString
+      val data = sparkSession.read.format("parquet").load(dataPath)
+      val Row(coefficients: Vector) = MLUtils.convertVectorColumnsToML(data, "coefficients").select("coefficients").head()
+      val model = new SampleNonLinearRegressionModel(metadata.uid, coefficients)
+      DefaultParamsReader.getAndSetParams(model, metadata)
+      model
+    }
+  }
+
+  override def read: MLReader[SampleNonLinearRegressionModel] = new SampleNonLinearModelReader
 }
 
 /**
@@ -240,12 +288,10 @@ private class LeastSquaresAggregator(coefficients: Vector)
       weightSum += other.weightSum
       lossSum += other.lossSum
 
-      var i = 0
       val localThisGradientSumArray = this.gradientSumArray
       val localOtherGradientSumArray = other.gradientSumArray
-      while (i < dim) {
+      for (i <- 0 until dim) {
         localThisGradientSumArray(i) += localOtherGradientSumArray(i)
-        i += 1
       }
     }
     this
@@ -292,6 +338,27 @@ private class LeastSquaresCostFunction(instances: RDD[Instance]) extends DiffFun
   }
 }
 
-class SampleNonLinearRegressionTrainingSummary() {
+class SampleNonLinearRegressionSummary(@transient val predictions: DataFrame,
+                                       val predictionCol: String,
+                                       val labelCol: String,
+                                       val featuresCol: String,
+                                       private val privateModel: SampleNonLinearRegressionModel,
+                                       private val diagInvAtWA: Array[Double]) extends Serializable {
+
+  @transient private val metrics = new RegressionMetrics(
+    predictions.select(col(predictionCol), col(labelCol).cast(DoubleType)).rdd.map {
+      case Row(pred: Double, label: Double) => (pred, label)
+    }, false
+  )
+
+  val explainedVariance: Double = metrics.explainedVariance
+
+  val meanAbsoluteError: Double = metrics.meanAbsoluteError
+
+  val meanSquaredError: Double = metrics.meanSquaredError
+
+  val rootMeanSquaredError: Double = metrics.rootMeanSquaredError
+
+  val r2: Double = metrics.r2
 
 }
