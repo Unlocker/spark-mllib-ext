@@ -40,12 +40,20 @@ import org.apache.spark.storage.StorageLevel
 
 import scala.collection.mutable
 
-
-trait SampleNonLinearRegressionParams extends PredictorParams
-  with HasMaxIter with HasTol with HasWeightCol
+/**
+  * Trait for the sample non-linear regression.
+  */
+trait SampleNonLinearRegressionParams
+  extends PredictorParams
+    with HasMaxIter
+    with HasTol
+    with HasWeightCol
 
 /**
   * Sample non-linear regression.
+  * {{{
+  *   F(x) = a_1 + a_2*exp^{-a_3*(x-a_0)^2} + a_4*atan(a_5*(x-a_0))
+  * }}}
   */
 class SampleNonLinearRegression(override val uid: String)
   extends Regressor[Vector, SampleNonLinearRegression, SampleNonLinearRegressionModel]
@@ -114,12 +122,14 @@ class SampleNonLinearRegression(override val uid: String)
   }
 }
 
+/**
+  * Sample non-linear regression companion object.
+  */
 object SampleNonLinearRegression
   extends DefaultParamsReadable[SampleNonLinearRegression] {
 
   /**
     * Calculates function value for the provided coefficients and features.
-    * F(x) = a1 + a2*exp(-a3*(x-a0)**2) + a4*atan(a5*(x-a0))
     *
     * @param coef     coefficients
     * @param features features
@@ -132,6 +142,13 @@ object SampleNonLinearRegression
     coef(1) + coef(2) * exp(-coef(3) * x * x) + coef(4) * Math.atan(coef(5) * x)
   }
 
+  /**
+    * Calculates the gradient vector.
+    *
+    * @param coef     coefficients
+    * @param features features
+    * @return gradient vector
+    */
   def firstPartialDerivative(coef: Vector, features: Vector): Array[Double] = {
     require(coef.size == 6, s"Expected coefficients size is 6, but provided is ${coef.size}")
     require(features.size == 1, s"Expected features size is 1, but provided is ${features.size}")
@@ -140,7 +157,7 @@ object SampleNonLinearRegression
     val exponent: Double = exp(-coef(3) * x * x)
     val divisor: Double = 1 + Math.pow(coef(5) * x, 2)
     // calculated partial derivatives for the objective function
-    val pda0 = -2 * coef(2) * coef(3) * x * exponent + coef(4) * coef(5) / divisor
+    val pda0 = -2 * coef(2) * coef(3) * x * exponent - coef(4) * coef(5) / divisor
     val pda1 = 1
     val pda2 = exponent
     val pda3 = -coef(2) * x * x * exponent
@@ -198,10 +215,19 @@ class SampleNonLinearRegressionModel(override val uid: String, val coefficients:
   }
 }
 
+/**
+  * Utility object for the SampleNonLinearRegressionModel.
+  */
 object SampleNonLinearRegressionModel extends MLReadable[SampleNonLinearRegressionModel] {
 
+  /**
+    * Model writer.
+    *
+    * @param instance model
+    */
   class SampleNonLinearModelWriter(instance: SampleNonLinearRegressionModel)
-    extends MLWriter with Logging {
+    extends MLWriter
+      with Logging {
 
     private case class Data(coefficients: Vector)
 
@@ -213,6 +239,9 @@ object SampleNonLinearRegressionModel extends MLReadable[SampleNonLinearRegressi
     }
   }
 
+  /**
+    * Model reader.
+    */
   private class SampleNonLinearModelReader extends MLReader[SampleNonLinearRegressionModel] {
 
     private val className = classOf[SampleNonLinearRegressionModel].getName
@@ -338,27 +367,54 @@ private class LeastSquaresCostFunction(instances: RDD[Instance]) extends DiffFun
   }
 }
 
+/**
+  * Training summary.
+  *
+  * @param predictions   DataFrame with predictions
+  * @param predictionCol prediction column name
+  * @param labelCol      label column name
+  * @param featuresCol   features column name
+  * @param privateModel  model
+  * @param diagInvAtWA   matrix
+  */
 class SampleNonLinearRegressionSummary(@transient val predictions: DataFrame,
                                        val predictionCol: String,
                                        val labelCol: String,
                                        val featuresCol: String,
                                        private val privateModel: SampleNonLinearRegressionModel,
                                        private val diagInvAtWA: Array[Double]) extends Serializable {
-
+  /**
+    * Metrics calculator.
+    */
   @transient private val metrics = new RegressionMetrics(
     predictions.select(col(predictionCol), col(labelCol).cast(DoubleType)).rdd.map {
       case Row(pred: Double, label: Double) => (pred, label)
     }, false
   )
 
+  /**
+    * Explained variance,
+    */
   val explainedVariance: Double = metrics.explainedVariance
 
+  /**
+    * Mean absolute error.
+    */
   val meanAbsoluteError: Double = metrics.meanAbsoluteError
 
+  /**
+    * Mean squared error.
+    */
   val meanSquaredError: Double = metrics.meanSquaredError
 
+  /**
+    * Root mean squared error.
+    */
   val rootMeanSquaredError: Double = metrics.rootMeanSquaredError
 
+  /**
+    * Unadjusted coefficient of determination.
+    */
   val r2: Double = metrics.r2
 
 }
