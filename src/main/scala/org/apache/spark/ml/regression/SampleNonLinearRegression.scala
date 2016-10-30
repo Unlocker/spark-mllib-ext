@@ -127,14 +127,14 @@ object SampleNonLinearRegression
     */
   def functionValue(coef: Vector, features: Vector): Double = {
     require(coef.size == 6, s"Expected coefficients size is 6, but provided is ${coef.size}")
-    require(coef.size == 1, s"Expected features size is 1, but provided is ${features.size}")
+    require(features.size == 1, s"Expected features size is 1, but provided is ${features.size}")
     val x = features(0) - coef(0)
     coef(1) + coef(2) * exp(-coef(3) * x * x) + coef(4) * Math.atan(coef(5) * x)
   }
 
   def firstPartialDerivative(coef: Vector, features: Vector): Array[Double] = {
     require(coef.size == 6, s"Expected coefficients size is 6, but provided is ${coef.size}")
-    require(coef.size == 1, s"Expected features size is 1, but provided is ${features.size}")
+    require(features.size == 1, s"Expected features size is 1, but provided is ${features.size}")
 
     val x = features(0) - coef(0)
     val exponent: Double = exp(-coef(3) * x * x)
