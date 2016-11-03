@@ -17,8 +17,6 @@
 
 package org.apache.spark.ml.regression
 
-import java.lang.Math.exp
-
 import breeze.linalg.{DenseVector => BDV}
 import breeze.optimize.{CachedDiffFunction, DiffFunction, LBFGS}
 import org.apache.hadoop.fs.Path
@@ -33,9 +31,9 @@ import org.apache.spark.ml.util._
 import org.apache.spark.mllib.evaluation.RegressionMetrics
 import org.apache.spark.mllib.util.MLUtils
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{DataFrame, Dataset, Row}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.DoubleType
+import org.apache.spark.sql.{DataFrame, Dataset, Row}
 import org.apache.spark.storage.StorageLevel
 
 import scala.collection.mutable
@@ -139,7 +137,7 @@ object SampleNonLinearRegression
     require(coef.size == 6, s"Expected coefficients size is 6, but provided is ${coef.size}")
     require(features.size == 1, s"Expected features size is 1, but provided is ${features.size}")
     val x = features(0) - coef(0)
-    coef(1) + coef(2) * exp(-coef(3) * x * x) + coef(4) * Math.atan(coef(5) * x)
+    coef(1) + coef(2) * math.exp(-coef(3) * x * x) + coef(4) * Math.atan(coef(5) * x)
   }
 
   /**
@@ -154,14 +152,14 @@ object SampleNonLinearRegression
     require(features.size == 1, s"Expected features size is 1, but provided is ${features.size}")
 
     val x = features(0) - coef(0)
-    val exponent: Double = exp(-coef(3) * x * x)
-    val divisor: Double = 1 + Math.pow(coef(5) * x, 2)
+    val exponent: Double = math.exp(-coef(3) * x * x)
+    val divisor: Double = 1 + math.pow(coef(5) * x, 2)
     // calculated partial derivatives for the objective function
     val pda0 = -2 * coef(2) * coef(3) * x * exponent - coef(4) * coef(5) / divisor
     val pda1 = 1
     val pda2 = exponent
     val pda3 = -coef(2) * x * x * exponent
-    val pda4 = Math.atan(coef(5) * x)
+    val pda4 = math.atan(coef(5) * x)
     val pda5 = coef(4) * x / divisor
     Array[Double](pda0, pda1, pda2, pda3, pda4, pda5)
   }
@@ -334,9 +332,7 @@ private class LeastSquaresAggregator(coefficients: Vector)
   /**
     * Accumulated loss
     */
-  def loss: Double = {
-    lossSum / weightSum
-  }
+  def loss: Double = lossSum / weightSum
 
   /**
     * Accumulated gradient
@@ -349,12 +345,19 @@ private class LeastSquaresAggregator(coefficients: Vector)
 }
 
 /**
-  * LeastSquaresCostFun implements Breeze's DiffFunction[T] for Least Squares cost.
+  * LeastSquaresCostFunction implements Breeze's DiffFunction[T] for Least Squares cost.
   * It's used in Breeze's convex optimization routines.
   */
 private class LeastSquaresCostFunction(instances: RDD[Instance]) extends DiffFunction[BDV[Double]] {
+
+  /**
+    * Calculates loss value and the gradient vector.
+    *
+    * @param coefficients coefficients vector
+    * @return the tuple: (loss, gradient vector)
+    */
   override def calculate(coefficients: BDV[Double]): (Double, BDV[Double]) = {
-    val coeffs = Vectors.fromBreeze(coefficients)
+    val coeffs: Vector = Vectors.fromBreeze(coefficients)
 
     val aggregator = {
       val mapOperator = (c: LeastSquaresAggregator, instance: Instance) => c.add(instance)
