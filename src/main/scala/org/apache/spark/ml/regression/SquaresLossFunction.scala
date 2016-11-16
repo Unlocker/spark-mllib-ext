@@ -1,6 +1,7 @@
 package org.apache.spark.ml.regression
 
-import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
+import breeze.linalg.eigSym.DenseEigSym
+import breeze.linalg.{eigSym, DenseMatrix => BDM, DenseVector => BDV}
 import breeze.optimize.DiffFunction
 
 /**
@@ -31,4 +32,21 @@ trait SquaresLossFunction extends DiffFunction[BDV[Double]] {
     * @return Hessian matrix approximation
     */
   def hessian(weights: BDV[Double]): BDM[Double]
+
+  /**
+    * Enforces positive definiteness of the Hessian matrix.
+    *
+    * @param H hessian
+    * @return positive definitive hessian matrix
+    */
+  def posDef(H: BDM[Double]): BDM[Double] = {
+    val eigens: DenseEigSym = eigSym(H)
+    val vectors = eigens.eigenvectors
+    val values = eigens.eigenvalues
+    val I = BDM.eye[Double](dim)
+    for (i <- 0 until dim) {
+      I(i, i) = if (values(i) < 1e-4) 1e-4 else values(i)
+    }
+    vectors * I * vectors.t
+  }
 }
