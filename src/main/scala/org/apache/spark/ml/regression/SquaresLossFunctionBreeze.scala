@@ -2,6 +2,8 @@ package org.apache.spark.ml.regression
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
 
+import scala.collection.immutable.IndexedSeq
+
 /**
   * Breeze implementation for the squares loss function.
   *
@@ -9,7 +11,7 @@ import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
   * @param xydata   labeled data combined into the matrix:
   *                 the first n-th columns consist of feature values, (n+1)-th columns contains labels
   */
-class SquaresLossFuctionBreeze(val fitmodel: NonlinearModel, xydata: BDM[Double])
+class SquaresLossFunctionBreeze(val fitmodel: NonlinearModel, xydata: BDM[Double])
   extends SquaresLossFunction {
 
   /**
@@ -42,7 +44,20 @@ class SquaresLossFuctionBreeze(val fitmodel: NonlinearModel, xydata: BDM[Double]
     * @param weights weights
     * @return (loss function value, gradient vector)
     */
-  override def calculate(weights: BDV[Double]): (Double, BDV[Double]) = ???
+  override def calculate(weights: BDV[Double]): (Double, BDV[Double]) = {
+    val r: BDV[Double] = diff(weights)
+    val f: Double = 0.5 * (r.t * r)
+    val grad: BDV[Double] = granal(weights)
+    (f, grad)
+  }
+
+  /**
+    * Calculates a positive definite approximation of the Hessian matrix.
+    *
+    * @param weights weights
+    * @return Hessian matrix approximation
+    */
+  override def hessian(weights: BDV[Double]): BDM[Double] = posDef(hanal(weights))
 
   /**
     * Calculates the Jacobian matrix
@@ -51,12 +66,11 @@ class SquaresLossFuctionBreeze(val fitmodel: NonlinearModel, xydata: BDM[Double]
     * @return
     */
   def janal(weights: BDV[Double]): BDM[Double] = {
+    val gradData: IndexedSeq[Double] = (0 until instanceCount)
+      .map(i => fitmodel.grad(weights, X(i, ::).t))
+      .flatMap(v => v.data)
 
-    val gradData: Array[Double] = (0 until instanceCount) map (i =>
-      fitmodel.grad(weights, X(i, ::).t)
-      ) flatMap { v => v.data } toArray
-
-    BDM.create(instanceCount, featureCount, gradData)
+    BDM.create(instanceCount, featureCount, gradData.toArray)
   }
 
   /**
@@ -71,11 +85,26 @@ class SquaresLossFuctionBreeze(val fitmodel: NonlinearModel, xydata: BDM[Double]
   }
 
   /**
-    * Calculates a positive definite approximation of the Hessian matrix.
+    * Calculates the difference vector
     *
     * @param weights weights
-    * @return Hessian matrix approximation
+    * @return difference vector
     */
-  override def hessian(weights: BDV[Double]): BDM[Double] = posDef(hanal(weights))
+  def diff(weights: BDV[Double]): BDV[Double] = {
+    val diff: IndexedSeq[Double] = (0 until instanceCount) map (i => y(i) - fitmodel.eval(weights, X(i, ::).t))
+    BDV(diff.toArray)
+  }
+
+  /**
+    * Calculates the gradient vector
+    *
+    * @param weights weights
+    * @return gradient vector
+    */
+  def granal(weights: BDV[Double]): BDV[Double] = {
+    val J: BDM[Double] = janal(weights)
+    val r = diff(weights)
+    2.0 * J.t * r
+  }
 }
 
