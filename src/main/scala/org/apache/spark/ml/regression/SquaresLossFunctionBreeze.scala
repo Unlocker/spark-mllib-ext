@@ -46,9 +46,7 @@ class SquaresLossFunctionBreeze(val fitmodel: NonlinearModel, xydata: BDM[Double
     */
   override def calculate(weights: BDV[Double]): (Double, BDV[Double]) = {
     val r: BDV[Double] = diff(weights)
-    val f: Double = 0.5 * (r.t * r)
-    val grad: BDV[Double] = granal(weights)
-    (f, grad)
+    (0.5 * (r.t * r), gradient(weights))
   }
 
   /**
@@ -57,7 +55,10 @@ class SquaresLossFunctionBreeze(val fitmodel: NonlinearModel, xydata: BDM[Double
     * @param weights weights
     * @return Hessian matrix approximation
     */
-  override def hessian(weights: BDV[Double]): BDM[Double] = posDef(hanal(weights))
+  override def hessian(weights: BDV[Double]): BDM[Double] = {
+    val J: BDM[Double] = jacobian(weights)
+    posDef(J.t * J)
+  }
 
   /**
     * Calculates the Jacobian matrix
@@ -65,33 +66,22 @@ class SquaresLossFunctionBreeze(val fitmodel: NonlinearModel, xydata: BDM[Double
     * @param weights weights
     * @return
     */
-  def janal(weights: BDV[Double]): BDM[Double] = {
+  def jacobian(weights: BDV[Double]): BDM[Double] = {
     val gradData: IndexedSeq[Double] = (0 until instanceCount)
       .map(i => fitmodel.grad(weights, X(i, ::).t))
       .flatMap(v => v.data)
 
-    BDM.create(instanceCount, featureCount, gradData.toArray)
+    BDM.create(instanceCount, dim, gradData.toArray)
   }
 
   /**
-    * Calculates the Hessian approximation
-    *
-    * @param weights weights
-    * @return Hessian
-    */
-  def hanal(weights: BDV[Double]): BDM[Double] = {
-    val J: BDM[Double] = janal(weights)
-    J.t * J
-  }
-
-  /**
-    * Calculates the difference vector
+    * Calculates the difference vector between the label and the approximated values.
     *
     * @param weights weights
     * @return difference vector
     */
   def diff(weights: BDV[Double]): BDV[Double] = {
-    val diff: IndexedSeq[Double] = (0 until instanceCount) map (i => y(i) - fitmodel.eval(weights, X(i, ::).t))
+    val diff: IndexedSeq[Double] = (0 until instanceCount) map (i => fitmodel.eval(weights, X(i, ::).t) - y(i))
     BDV(diff.toArray)
   }
 
@@ -101,8 +91,8 @@ class SquaresLossFunctionBreeze(val fitmodel: NonlinearModel, xydata: BDM[Double
     * @param weights weights
     * @return gradient vector
     */
-  def granal(weights: BDV[Double]): BDV[Double] = {
-    val J: BDM[Double] = janal(weights)
+  def gradient(weights: BDV[Double]): BDV[Double] = {
+    val J: BDM[Double] = jacobian(weights)
     val r = diff(weights)
     2.0 * J.t * r
   }
