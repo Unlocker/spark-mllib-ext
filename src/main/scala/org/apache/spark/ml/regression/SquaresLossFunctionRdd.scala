@@ -29,19 +29,17 @@ class SquaresLossFunctionRdd(val fitmodel: NonlinearModel, val xydata: RDD[Insta
   override def calculate(weights: BDV[Double]): (Double, BDV[Double]) = {
     val bcW = xydata.context.broadcast(weights)
 
-    val (grad: BDV[Double], f: Double) = xydata.map(inst => (inst.label, inst.features))
+    val (grad: BDV[Double], f: Double) = xydata.map(inst => (inst.label, BDV(inst.features.toArray)))
       .treeAggregate((BDV.zeros(dim), 0.0))(
-        seqOp = (c, v) => (c, v) match {
+        seqOp = (combiner, item) => (combiner, item) match {
           case ((oldGrad, loss), (label, features)) =>
-            val feat: BDV[Double] = BDV(features.toArray)
             val w: BDV[Double] = BDV(bcW.value.toArray)
-            val pred = fitmodel.eval(w, feat)
-            val gradPred = fitmodel.grad(w, feat)
-            val addedLoss: Double = 0.5 * math.pow(label - pred, 2)
-            val addedGrad: BDV[Double] = 2.0 * (pred - label) * gradPred
+            val prediction = fitmodel.eval(w, features)
+            val addedLoss: Double = 0.5 * math.pow(label - prediction, 2)
+            val addedGrad: BDV[Double] = 2.0 * (prediction - label) * fitmodel.grad(w, features)
             (oldGrad + addedGrad, loss + addedLoss)
         },
-        combOp = (c1, c2) => (c1, c2) match {
+        combOp = (combiner1, combiner2) => (combiner1, combiner2) match {
           case ((grad1: BDV[Double], loss1), (grad2: BDV[Double], loss2)) => (grad1 + grad2, loss1 + loss2)
         })
 
@@ -54,5 +52,23 @@ class SquaresLossFunctionRdd(val fitmodel: NonlinearModel, val xydata: RDD[Insta
     * @param weights weights
     * @return Hessian matrix approximation
     */
-  override def hessian(weights: BDV[Double]): BDM[Double] = ???
+  override def hessian(weights: BDV[Double]): BDM[Double] = {
+    val bcW = xydata.context.broadcast(weights)
+
+    val (hessian: BDM[Double]) = xydata.map(inst => (inst.label, BDV(inst.features.toArray)))
+      .treeAggregate(new BDM[Double](dim, dim, new Array[Double](dim * dim)))(
+        seqOp = (combiner, item) => (combiner, item) match {
+          case ((oldHessian), (label, features)) =>
+            val w: BDV[Double] = BDV(bcW.value.toArray)
+            val grad = fitmodel.grad(w, features)
+            val subHessian: BDM[Double] = grad * grad.t
+            oldHessian + subHessian
+        },
+        combOp = (combiner1, combiner2) => (combiner1, combiner2) match {
+          case (hessian1, hessian2) => hessian1 + hessian2
+        }
+      )
+
+    posDef(hessian)
+  }
 }
