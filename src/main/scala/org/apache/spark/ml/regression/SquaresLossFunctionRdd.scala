@@ -30,7 +30,7 @@ class SquaresLossFunctionRdd(val fitmodel: NonlinearModel, val xydata: RDD[Insta
     val bcW = xydata.context.broadcast(weights)
 
     val (grad: BDV[Double], f: Double) = xydata.map(inst => (inst.label, BDV(inst.features.toArray)))
-      .treeAggregate((BDV.zeros(dim), 0.0))(
+      .treeAggregate((BDV.zeros[Double](dim), 0.0))(
         seqOp = (combiner, item) => (combiner, item) match {
           case ((oldGrad, loss), (label, features)) =>
             val w: BDV[Double] = BDV(bcW.value.toArray)
