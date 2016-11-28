@@ -2,8 +2,6 @@ package org.apache.spark.ml.regression
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
 
-import scala.collection.immutable.IndexedSeq
-
 /**
   * Breeze implementation for the squares loss function.
   *
@@ -64,14 +62,11 @@ class SquaresLossFunctionBreeze(val fitmodel: NonlinearModel, xydata: BDM[Double
     * Calculates the Jacobian matrix
     *
     * @param weights weights
-    * @return
+    * @return the Jacobian
     */
   def jacobian(weights: BDV[Double]): BDM[Double] = {
-    val gradData: IndexedSeq[Double] = (0 until instanceCount)
-      .map(i => fitmodel.grad(weights, X(i, ::).t))
-      .flatMap(v => v.data)
-
-    BDM.create(instanceCount, dim, gradData.toArray)
+    val gradData = (0 until instanceCount) map { i => fitmodel.grad(weights, X(i, ::).t).toArray }
+    BDM(gradData: _*)
   }
 
   /**
@@ -81,7 +76,7 @@ class SquaresLossFunctionBreeze(val fitmodel: NonlinearModel, xydata: BDM[Double
     * @return difference vector
     */
   def diff(weights: BDV[Double]): BDV[Double] = {
-    val diff: IndexedSeq[Double] = (0 until instanceCount) map (i => fitmodel.eval(weights, X(i, ::).t) - y(i))
+    val diff = (0 until instanceCount) map (i => fitmodel.eval(weights, X(i, ::).t) - y(i))
     BDV(diff.toArray)
   }
 
