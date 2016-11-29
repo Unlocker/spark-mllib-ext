@@ -9,7 +9,7 @@ import breeze.optimize.DiffFunction
   *
   * @see http://www.nodalpoint.com/non-linear-regression-using-spark-part2-sum-of-squares
   */
-trait SquaresLossFunction extends DiffFunction[BDV[Double]] {
+trait SquaresLossFunction extends DiffFunction[BDV[Double]] with Serializable {
   /**
     * The model dimensionality (the number of weights).
     *
@@ -43,10 +43,8 @@ trait SquaresLossFunction extends DiffFunction[BDV[Double]] {
     val eigens: DenseEigSym = eigSym(H)
     val vectors = eigens.eigenvectors
     val values = eigens.eigenvalues
-    val I = BDM.eye[Double](dim)
-    for (i <- 0 until dim) {
-      I(i, i) = if (values(i) < 1e-4) 1e-4 else values(i)
-    }
+    val I: BDM[Double] = BDM.eye[Double](dim)
+    (0 until dim) foreach { i => I.update(i, i, if (values(i) < 1e-4) 1e-4 else values(i)) }
     vectors * I * vectors.t
   }
 }

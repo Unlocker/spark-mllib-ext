@@ -8,7 +8,7 @@ import breeze.linalg.DenseVector
   *   f(x) = b_1*x^{b_2}
   * }}}
   */
-class StubNonlinearFunction extends NonlinearModel {
+class StubNonlinearFunction extends NonlinearModel with Serializable {
 
   /**
     * Step to calculate the gradient.
