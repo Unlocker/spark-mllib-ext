@@ -1,6 +1,7 @@
 package org.apache.spark.ml.regression
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
+import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.ml.feature.Instance
 import org.apache.spark.rdd.RDD
 
@@ -27,21 +28,21 @@ class SquaresLossFunctionRdd(val fitmodel: NonlinearFunction, val xydata: RDD[In
     * @return (loss function value, gradient vector)
     */
   override def calculate(weights: BDV[Double]): (Double, BDV[Double]) = {
-    val bcW = xydata.context.broadcast(weights)
+    val bcW: Broadcast[BDV[Double]] = xydata.context.broadcast(weights)
 
-    val (grad: BDV[Double], f: Double) = xydata.map(inst => (inst.label, BDV(inst.features.toArray)))
-      .treeAggregate((BDV.zeros[Double](dim), 0.0))(
-        seqOp = (combiner, item) => (combiner, item) match {
-          case ((oldGrad, loss), (label, features)) =>
-            val w: BDV[Double] = BDV(bcW.value.toArray)
-            val prediction = fitmodel.eval(w, features)
-            val addedLoss: Double = 0.5 * math.pow(label - prediction, 2)
-            val addedGrad: BDV[Double] = 2.0 * (prediction - label) * fitmodel.grad(w, features)
-            (oldGrad + addedGrad, loss + addedLoss)
-        },
-        combOp = (combiner1, combiner2) => (combiner1, combiner2) match {
-          case ((grad1: BDV[Double], loss1), (grad2: BDV[Double], loss2)) => (grad1 + grad2, loss1 + loss2)
-        })
+    val (f: Double, grad: BDV[Double]) = xydata.treeAggregate((0.0, BDV.zeros[Double](dim)))(
+      seqOp = (comb, item) => (comb, item) match {
+        case ((loss, oldGrad), Instance(label, _, features)) =>
+          val featuresBdv = features.asBreeze.toDenseVector
+          val w: BDV[Double] = bcW.value
+          val prediction = fitmodel.eval(w, featuresBdv)
+          val addedLoss: Double = 0.5 * math.pow(label - prediction, 2)
+          val addedGrad: BDV[Double] = 2.0 * (prediction - label) * fitmodel.grad(w, featuresBdv)
+          (loss + addedLoss, oldGrad + addedGrad)
+      },
+      combOp = (comb1, comb2) => (comb1, comb2) match {
+        case ((loss1, grad1: BDV[Double]), (loss2, grad2: BDV[Double])) => (loss1 + loss2, grad1 + grad2)
+      })
 
     (f, grad)
   }
@@ -55,19 +56,17 @@ class SquaresLossFunctionRdd(val fitmodel: NonlinearFunction, val xydata: RDD[In
   override def hessian(weights: BDV[Double]): BDM[Double] = {
     val bcW = xydata.context.broadcast(weights)
 
-    val (hessian: BDM[Double]) = xydata.map(inst => (inst.label, BDV(inst.features.toArray)))
-      .treeAggregate(new BDM[Double](dim, dim, new Array[Double](dim * dim)))(
-        seqOp = (combiner, item) => (combiner, item) match {
-          case ((oldHessian), (label, features)) =>
-            val w: BDV[Double] = BDV(bcW.value.toArray)
-            val grad = fitmodel.grad(w, features)
-            val subHessian: BDM[Double] = grad * grad.t
-            oldHessian + subHessian
-        },
-        combOp = (combiner1, combiner2) => (combiner1, combiner2) match {
-          case (hessian1, hessian2) => hessian1 + hessian2
-        }
-      )
+    val (hessian: BDM[Double]) = xydata.treeAggregate(new BDM[Double](dim, dim, Array.ofDim[Double](dim * dim)))(
+      seqOp = (comb, item) => (comb, item) match {
+        case ((oldHessian), Instance(_, _, features)) =>
+          val grad = fitmodel.grad(bcW.value, features.asBreeze.toDenseVector)
+          val subHessian: BDM[Double] = grad * grad.t
+          oldHessian + subHessian
+      },
+      combOp = (comb1, comb2) => (comb1, comb2) match {
+        case (hessian1, hessian2) => hessian1 + hessian2
+      }
+    )
 
     posDef(hessian)
   }
