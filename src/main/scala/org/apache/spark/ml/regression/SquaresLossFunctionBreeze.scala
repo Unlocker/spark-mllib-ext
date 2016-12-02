@@ -9,7 +9,7 @@ import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
   * @param xydata   labeled data combined into the matrix:
   *                 the first n-th columns consist of feature values, (n+1)-th columns contains labels
   */
-class SquaresLossFunctionBreeze(val fitmodel: NonlinearModel, xydata: BDM[Double])
+class SquaresLossFunctionBreeze(val fitmodel: NonlinearFunction, xydata: BDM[Double])
   extends SquaresLossFunction {
 
   /**

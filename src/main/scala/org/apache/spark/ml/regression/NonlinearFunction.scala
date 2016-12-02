@@ -3,11 +3,11 @@ package org.apache.spark.ml.regression
 import breeze.linalg.{DenseVector => BDV}
 
 /**
-  * The generic definition of non-linear model.
+  * The generic definition of non-linear function used to learn the model.
   *
   * @see http://www.nodalpoint.com/nonlinear-regression-using-spark-part-1-nonlinear-models/
   */
-trait NonlinearModel {
+trait NonlinearFunction {
   /**
     * Evaluates function value.
     *

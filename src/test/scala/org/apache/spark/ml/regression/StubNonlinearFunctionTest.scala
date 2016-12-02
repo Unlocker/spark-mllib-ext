@@ -10,7 +10,7 @@ import scala.math.BigDecimal.RoundingMode.HALF_UP
   */
 class StubNonlinearFunctionTest extends FunSpec with Matchers {
 
-  val func: NonlinearModel = new StubNonlinearFunction()
+  val func: NonlinearFunction = new StubNonlinearFunction()
   val weights = DenseVector(Array(2.0, 2.0))
   val x: DenseVector[Double] = DenseVector[Double](Array(1.5))
 

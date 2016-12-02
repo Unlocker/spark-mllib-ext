@@ -10,7 +10,7 @@ import org.apache.spark.rdd.RDD
   * @param fitmodel concrete model implementation
   * @param xydata   RDD with instances
   */
-class SquaresLossFunctionRdd(val fitmodel: NonlinearModel, val xydata: RDD[Instance])
+class SquaresLossFunctionRdd(val fitmodel: NonlinearFunction, val xydata: RDD[Instance])
   extends SquaresLossFunction {
 
   /**
