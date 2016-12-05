@@ -7,7 +7,7 @@ import org.apache.spark.sql.DataFrame
 import org.scalatest.{FlatSpec, Matchers}
 
 /**
-  * Test suite for [[SampleNonLinearRegression]]
+  * Test suite for [[NonLinearRegression]]
   */
 class SampleNonLinearRegressionTest extends FlatSpec
   with Matchers with MLlibTestSparkContext {
@@ -73,30 +73,14 @@ class SampleNonLinearRegressionTest extends FlatSpec
     )
   }
 
-  "Function value" should "calculate as intended" in {
-    val features = Vectors.dense(Array[Double](25))
-    val coef = Vectors.dense(Array[Double](25, 1, 1, 1, 1, 1))
-    val result = SampleNonLinearRegression.functionValue(coef, features)
-
-    result should equal(2.0)
-  }
-
-  "First derivative function value" should "calculate as intended" in {
-    val features = Vectors.dense(Array[Double](25))
-    val coef = Vectors.dense(Array[Double](25, 1, 1, 1, 1, 1))
-    val result = SampleNonLinearRegression.firstPartialDerivative(coef, features)
-
-    result should equal(Array[Double](-1, 1, 1, 0, 0, 0))
-  }
-
-  "Model" should "be fitted" in {
-    val trainer = new SampleNonLinearRegression()
-    val model = trainer.fit(dataset)
-
-    model.hasSummary should be(true)
-
-    println(s"Coefficients = " + model.coefficients.toArray.mkString(","))
-    println(s"Explained Variance = ${model.summary.explainedVariance}")
-    println(s"MSE = ${model.summary.meanSquaredError}")
-  }
+//  "Model" should "be fitted" in {
+  //    val trainer = new NonLinearRegression()
+  //    val model = trainer.fit(dataset)
+  //
+  //    model.hasSummary should be(true)
+  //
+  //    println(s"Coefficients = " + model.coefficients.toArray.mkString(","))
+  //    println(s"Explained Variance = ${model.summary.explainedVariance}")
+  //    println(s"MSE = ${model.summary.meanSquaredError}")
+  //  }
 }
