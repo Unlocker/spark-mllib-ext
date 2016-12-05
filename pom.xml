@@ -9,7 +9,6 @@
     <modelVersion>4.0.0</modelVersion>
     <artifactId>spark-mllib-ext_2.11</artifactId>
     <name>Spark Project ML Extension Library</name>
-    <url>http://spark.apache.org/</url>
     <build>
         <outputDirectory>target/scala-${scala.binary.version}/classes</outputDirectory>
         <testOutputDirectory>target/scala-${scala.binary.version}/test-classes</testOutputDirectory>
@@ -27,19 +26,17 @@
             </dependencies>
         </profile>
     </profiles>
+    <properties>
+        <sbt.project.name>mllib-ext</sbt.project.name>
+        <spark.version>2.0.1</spark.version>
+    </properties>
     <dependencies>
+        <!-- Compile dependencies -->
         <dependency>
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-core_2.11</artifactId>
             <version>${spark.version}</version>
             <scope>compile</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.spark</groupId>
-            <artifactId>spark-core_2.11</artifactId>
-            <version>${spark.version}</version>
-            <type>test-jar</type>
-            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.apache.spark</groupId>
@@ -72,13 +69,6 @@
             <scope>compile</scope>
         </dependency>
         <dependency>
-            <groupId>org.apache.spark</groupId>
-            <artifactId>spark-mllib-local_2.11</artifactId>
-            <version>${spark.version}</version>
-            <type>test-jar</type>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
             <groupId>org.scalanlp</groupId>
             <artifactId>breeze_2.11</artifactId>
             <version>0.12</version>
@@ -100,6 +90,26 @@
             <version>3.4.1</version>
             <scope>compile</scope>
         </dependency>
+        <dependency>
+            <groupId>org.jpmml</groupId>
+            <artifactId>pmml-model</artifactId>
+            <version>1.2.15</version>
+            <scope>compile</scope>
+            <exclusions>
+                <exclusion>
+                    <artifactId>pmml-agent</artifactId>
+                    <groupId>org.jpmml</groupId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-tags_2.11</artifactId>
+            <version>${spark.version}</version>
+            <scope>compile</scope>
+        </dependency>
+
+        <!-- Test dependencies -->
         <dependency>
             <groupId>org.scalacheck</groupId>
             <artifactId>scalacheck_2.11</artifactId>
@@ -132,22 +142,25 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.jpmml</groupId>
-            <artifactId>pmml-model</artifactId>
-            <version>1.2.15</version>
-            <scope>compile</scope>
-            <exclusions>
-                <exclusion>
-                    <artifactId>pmml-agent</artifactId>
-                    <groupId>org.jpmml</groupId>
-                </exclusion>
-            </exclusions>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-mllib_2.11</artifactId>
+            <version>${spark.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.apache.spark</groupId>
-            <artifactId>spark-tags_2.11</artifactId>
+            <artifactId>spark-mllib-local_2.11</artifactId>
             <version>${spark.version}</version>
-            <scope>compile</scope>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-core_2.11</artifactId>
+            <version>${spark.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.scalatest</groupId>
@@ -180,9 +193,5 @@
             </exclusions>
         </dependency>
     </dependencies>
-    <properties>
-        <sbt.project.name>mllib-ext</sbt.project.name>
-        <spark.version>2.0.1</spark.version>
-    </properties>
 </project>
 

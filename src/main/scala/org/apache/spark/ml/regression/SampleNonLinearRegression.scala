@@ -266,12 +266,12 @@ object SampleNonLinearRegressionModel extends MLReadable[SampleNonLinearRegressi
 private class LeastSquaresAggregator(coefficients: Vector)
   extends Serializable {
 
-  private var totalCnt: Long = 0L
-  private var weightSum: Double = 0.0
-  private var lossSum = 0.0
+  var totalCnt: Long = 0L
+  var weightSum: Double = 0.0
+  var lossSum = 0.0
 
-  private val dim = coefficients.size
-  private val gradientSumArray = Array.ofDim[Double](dim)
+  val dim: Int = coefficients.size
+  val gradientSumArray: Array[Double] = Array.ofDim[Double](dim)
 
   /**
     * Evaluates instance error and updates counters.
