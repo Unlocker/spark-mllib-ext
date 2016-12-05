@@ -26,7 +26,7 @@ class NonLinearRegressionModel(override val uid: String, val kernel: NonlinearFu
 
   private var trainingSummary: Option[NonLinearRegressionSummary] = None
 
-  override val numFeatures: Int = coefficients.size
+  override val numFeatures: Int = kernel.dim
 
   def setSummary(summary: NonLinearRegressionSummary): this.type = {
     this.trainingSummary = Some(summary)
@@ -90,8 +90,7 @@ object NonLinearRegressionModel extends MLReadable[NonLinearRegressionModel] {
     */
   def deserialize[T <: scala.Serializable](data: String): T = {
     val bytes: Array[Byte] = Base64.getDecoder.decode(data)
-    val bais = new ByteArrayInputStream(bytes)
-    val ois = new ObjectInputStream(bais)
+    val ois = new ObjectInputStream(new ByteArrayInputStream(bytes))
     val obj = ois.readObject()
     ois.close()
     obj.asInstanceOf[T]

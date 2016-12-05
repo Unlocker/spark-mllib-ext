@@ -53,8 +53,6 @@ class NonLinearRegression(override val uid: String, val kernel: NonlinearFunctio
     */
   def this(kernel: NonlinearFunction) = this(Identifiable.randomUID("nonLinReg"), kernel)
 
-  override def copy(extra: ParamMap): NonLinearRegression = defaultCopy(extra)
-
   def setMaxIter(value: Int): this.type = set(maxIter, value)
 
   setDefault(maxIter -> 100)
@@ -65,6 +63,14 @@ class NonLinearRegression(override val uid: String, val kernel: NonlinearFunctio
 
   def setWeightCol(value: String): this.type = set(weightCol, value)
 
+  override def copy(extra: ParamMap): NonLinearRegression = defaultCopy(extra)
+
+  /**
+    * Trains the regressor to produce model.
+    *
+    * @param dataset training set
+    * @return model
+    */
   override protected def train(dataset: Dataset[_]): NonLinearRegressionModel = {
     val w = if (!isDefined(weightCol) || $(weightCol).isEmpty) lit(1.0) else col($(weightCol))
     val instances: RDD[Instance] = dataset.select(
