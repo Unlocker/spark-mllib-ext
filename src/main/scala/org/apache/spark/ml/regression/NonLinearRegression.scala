@@ -39,7 +39,7 @@ import scala.collection.mutable
   * @param uid    unique identifier
   * @param kernel a non linear regression function
   */
-class NonLinearRegression(override val uid: String, val kernel: NonLinearFunction, val initial: Vector)
+class NonLinearRegression(override val uid: String, val kernel: NonLinearFunction)
   extends Regressor[Vector, NonLinearRegression, NonLinearRegressionModel]
     with NonLinearRegressionParams
     with DefaultParamsWritable
@@ -90,9 +90,11 @@ class NonLinearRegression(override val uid: String, val kernel: NonLinearFunctio
 
     // checks and assigns the initial coefficients
     val initial = {
-      if (!isDefined(initCoeffs) || $(initCoeffs).length != kernel.dim)
+      if (!isDefined(initCoeffs) || $(initCoeffs).length != kernel.dim) {
+        if ($(initCoeffs).length != kernel.dim)
+          logWarning(s"Provided initial coefficients vector (${$(initCoeffs)}) not corresponds with model dimensionality equals to ${kernel.dim}")
         BDV.zeros[Double](kernel.dim)
-      else
+      } else
         BDV($(initCoeffs).clone())
     }
 
