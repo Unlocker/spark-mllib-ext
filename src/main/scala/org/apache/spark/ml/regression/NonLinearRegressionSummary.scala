@@ -8,16 +8,18 @@ import org.apache.spark.sql.{DataFrame, Row}
 /**
   * Training summary.
   *
-  * @param predictions   DataFrame with predictions
-  * @param predictionCol prediction column name
-  * @param labelCol      label column name
-  * @param featuresCol   features column name
-  * @param privateModel  model
+  * @param predictions     DataFrame with predictions
+  * @param predictionCol   prediction column name
+  * @param labelCol        label column name
+  * @param featuresCol     features column name
+  * @param learningHistory loss function values through the learning
+  * @param privateModel    model
   */
 class NonLinearRegressionSummary(@transient val predictions: DataFrame,
                                  val predictionCol: String,
                                  val labelCol: String,
                                  val featuresCol: String,
+                                 val learningHistory: Array[Double],
                                  private val privateModel: NonLinearRegressionModel) extends Serializable {
   /**
     * Metrics calculator.
@@ -31,26 +33,26 @@ class NonLinearRegressionSummary(@transient val predictions: DataFrame,
   /**
     * Explained variance,
     */
-  val explainedVariance: Double = metrics.explainedVariance
+  def explainedVariance: Double = metrics.explainedVariance
 
   /**
     * Mean absolute error.
     */
-  val meanAbsoluteError: Double = metrics.meanAbsoluteError
+  def meanAbsoluteError: Double = metrics.meanAbsoluteError
 
   /**
     * Mean squared error.
     */
-  val meanSquaredError: Double = metrics.meanSquaredError
+  def meanSquaredError: Double = metrics.meanSquaredError
 
   /**
     * Root mean squared error.
     */
-  val rootMeanSquaredError: Double = metrics.rootMeanSquaredError
+  def rootMeanSquaredError: Double = metrics.rootMeanSquaredError
 
   /**
     * Unadjusted coefficient of determination.
     */
-  val r2: Double = metrics.r2
+  def r2: Double = metrics.r2
 
 }

@@ -24,7 +24,7 @@ class SquaresLossFunctionBreezeTest extends FunSpec with Matchers {
   /**
     * SUT
     */
-  val subj = new SquaresLossFunctionBreeze(new StubNonlinearFunction(), xydata)
+  val subj = new SquaresLossFunctionBreeze(new StubNonLinearFunction(), xydata)
   /**
     * Scale
     */

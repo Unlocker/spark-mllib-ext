@@ -28,7 +28,7 @@ import org.apache.spark.ml.util._
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.DoubleType
-import org.apache.spark.sql.{Dataset, Row}
+import org.apache.spark.sql.{Column, Dataset, Row}
 import org.apache.spark.storage.StorageLevel
 
 import scala.collection.mutable
@@ -39,7 +39,7 @@ import scala.collection.mutable
   * @param uid    unique identifier
   * @param kernel a non linear regression function
   */
-class NonLinearRegression(override val uid: String, val kernel: NonlinearFunction)
+class NonLinearRegression(override val uid: String, val kernel: NonLinearFunction)
   extends Regressor[Vector, NonLinearRegression, NonLinearRegressionModel]
     with NonLinearRegressionParams
     with DefaultParamsWritable
@@ -51,7 +51,7 @@ class NonLinearRegression(override val uid: String, val kernel: NonlinearFunctio
     * @param kernel a non linear regression function
     * @return non-linear regression
     */
-  def this(kernel: NonlinearFunction) = this(Identifiable.randomUID("nonLinReg"), kernel)
+  def this(kernel: NonLinearFunction) = this(Identifiable.randomUID("nonLinReg"), kernel)
 
   def setMaxIter(value: Int): this.type = set(maxIter, value)
 
@@ -72,9 +72,10 @@ class NonLinearRegression(override val uid: String, val kernel: NonlinearFunctio
     * @return model
     */
   override protected def train(dataset: Dataset[_]): NonLinearRegressionModel = {
-    val w = if (!isDefined(weightCol) || $(weightCol).isEmpty) lit(1.0) else col($(weightCol))
+    // set instance weight to 1 if not defined the column
+    val instanceWeightCol: Column = if (!isDefined(weightCol) || $(weightCol).isEmpty) lit(1.0) else col($(weightCol))
     val instances: RDD[Instance] = dataset.select(
-      col($(labelCol)).cast(DoubleType), w, col($(featuresCol))).rdd.map {
+      col($(labelCol)).cast(DoubleType), instanceWeightCol, col($(featuresCol))).rdd.map {
       case Row(label: Double, weight: Double, features: Vector) => Instance(label, weight, features)
     }
 
@@ -85,14 +86,12 @@ class NonLinearRegression(override val uid: String, val kernel: NonlinearFunctio
     val costFunc = new SquaresLossFunctionRdd(kernel, instances)
     val optimizer = new LBFGS[BDV[Double]]($(maxIter), 10, $(tol))
 
-    val initialCoef = Vectors.zeros(kernel.dim)
-    val states = optimizer.iterations(new CachedDiffFunction[BDV[Double]](costFunc),
-      initialCoef.asBreeze.toDenseVector)
+    val states = optimizer.iterations(new CachedDiffFunction[BDV[Double]](costFunc), BDV.zeros(kernel.dim))
     val (coefficients, objectiveHistory) = {
       val builder = mutable.ArrayBuilder.make[Double]
       var state: optimizer.State = null
       while (states.hasNext) {
-        state = states.next()
+        state = states.next
         builder += state.adjustedValue
       }
 
@@ -105,14 +104,13 @@ class NonLinearRegression(override val uid: String, val kernel: NonlinearFunctio
 
       (Vectors.dense(state.x.toArray.clone()).compressed, builder.result)
     }
-
+    // unpersists the instances RDD
     if (handlePersistence) instances.unpersist()
-    val model = copyValues(new NonLinearRegressionModel(uid, kernel, coefficients))
-    val (summaryModel: NonLinearRegressionModel, predictionColName: String) =
-      model.findSummaryModelAndPredictionCol()
 
-    val trainingSummary = new NonLinearRegressionSummary(summaryModel.transform(dataset),
-      predictionColName, $(labelCol), $(featuresCol), model
+    val model = copyValues(new NonLinearRegressionModel(uid, kernel, coefficients))
+    val (summaryModel: NonLinearRegressionModel, predictionColName: String) = model.findSummaryModelAndPredictionCol()
+    val trainingSummary = new NonLinearRegressionSummary(
+      summaryModel.transform(dataset), predictionColName, $(labelCol), $(featuresCol), objectiveHistory, model
     )
     model.setSummary(trainingSummary)
   }

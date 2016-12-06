@@ -41,7 +41,7 @@ class SquaresLossFunctionRddTest extends FunSpec
 
   override protected def beforeEach(): Unit = {
     super.beforeEach()
-    subj = new SquaresLossFunctionRdd(new StubNonlinearFunction(), dataset)
+    subj = new SquaresLossFunctionRdd(new StubNonLinearFunction(), dataset)
   }
 
   /**

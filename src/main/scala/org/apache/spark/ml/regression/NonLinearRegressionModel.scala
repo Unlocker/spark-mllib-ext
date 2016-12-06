@@ -19,7 +19,7 @@ import org.apache.spark.sql.Row
   * @param kernel       regression function
   * @param coefficients coefficients
   */
-class NonLinearRegressionModel(override val uid: String, val kernel: NonlinearFunction, val coefficients: Vector)
+class NonLinearRegressionModel(override val uid: String, val kernel: NonLinearFunction, val coefficients: Vector)
   extends RegressionModel[Vector, NonLinearRegressionModel]
     with NonLinearRegressionParams
     with MLWritable {

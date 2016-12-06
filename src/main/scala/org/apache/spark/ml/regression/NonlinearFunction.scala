@@ -7,7 +7,7 @@ import breeze.linalg.{DenseVector => BreezeVector}
   *
   * @see http://www.nodalpoint.com/nonlinear-regression-using-spark-part-1-nonlinear-models/
   */
-trait NonlinearFunction extends Serializable {
+trait NonLinearFunction extends Serializable {
   /**
     * Evaluates function value.
     *
