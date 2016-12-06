@@ -39,7 +39,7 @@ import scala.collection.mutable
   * @param uid    unique identifier
   * @param kernel a non linear regression function
   */
-class NonLinearRegression(override val uid: String, val kernel: NonLinearFunction)
+class NonLinearRegression(override val uid: String, val kernel: NonLinearFunction, val initial: Vector)
   extends Regressor[Vector, NonLinearRegression, NonLinearRegressionModel]
     with NonLinearRegressionParams
     with DefaultParamsWritable
@@ -52,6 +52,8 @@ class NonLinearRegression(override val uid: String, val kernel: NonLinearFunctio
     * @return non-linear regression
     */
   def this(kernel: NonLinearFunction) = this(Identifiable.randomUID("nonLinReg"), kernel)
+
+  def setInitCoeffs(value: Array[Double]): this.type = set(initCoeffs, value)
 
   def setMaxIter(value: Int): this.type = set(maxIter, value)
 
@@ -86,7 +88,15 @@ class NonLinearRegression(override val uid: String, val kernel: NonLinearFunctio
     val costFunc = new SquaresLossFunctionRdd(kernel, instances)
     val optimizer = new LBFGS[BDV[Double]]($(maxIter), 10, $(tol))
 
-    val states = optimizer.iterations(new CachedDiffFunction[BDV[Double]](costFunc), BDV.zeros(kernel.dim))
+    // checks and assigns the initial coefficients
+    val initial = {
+      if (!isDefined(initCoeffs) || $(initCoeffs).length != kernel.dim)
+        BDV.zeros[Double](kernel.dim)
+      else
+        BDV($(initCoeffs).clone())
+    }
+
+    val states = optimizer.iterations(new CachedDiffFunction[BDV[Double]](costFunc), initial)
     val (coefficients, objectiveHistory) = {
       val builder = mutable.ArrayBuilder.make[Double]
       var state: optimizer.State = null
