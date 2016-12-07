@@ -1,10 +1,12 @@
 package org.apache.spark.ml.regression
 
 import breeze.linalg.DenseVector
+import org.apache.spark.ml.feature.Instance
+import org.apache.spark.ml.linalg.Vectors
 import org.apache.spark.mllib.util.MLlibTestSparkContext
-import org.apache.spark.sql.DataFrame
 import org.apache.spark.sql.types.DataTypes._
 import org.apache.spark.sql.types.{StructField, StructType}
+import org.apache.spark.sql.{DataFrame, Row, SQLContext, SQLImplicits}
 import org.scalatest.{FlatSpec, Matchers}
 
 /**
@@ -26,6 +28,12 @@ class NonLinearRegressionTest extends FlatSpec with Matchers with MLlibTestSpark
     override def dim: Int = 6
   }
 
+  private object testImplicits extends SQLImplicits {
+    protected override def _sqlContext: SQLContext = spark.sqlContext
+  }
+
+  import testImplicits._
+
   @transient var dataset: DataFrame = _
 
   override def beforeAll(): Unit = {
@@ -44,14 +52,22 @@ class NonLinearRegressionTest extends FlatSpec with Matchers with MLlibTestSpark
       .csv(getClass.getResource("/noised_nonlinear_function.csv").getFile)
   }
 
-  //  "Model" should "be fitted" in {
-  //    val trainer = new NonLinearRegression()
-  //    val model = trainer.fit(dataset)
-  //
-  //    model.hasSummary should be(true)
-  //
-  //    println(s"Coefficients = " + model.coefficients.toArray.mkString(","))
-  //    println(s"Explained Variance = ${model.summary.explainedVariance}")
-  //    println(s"MSE = ${model.summary.meanSquaredError}")
-  //  }
+  "Model" should "be fitted" in {
+    val trainer = new NonLinearRegression(new SampleNonLinearFunction)
+    trainer.setInitCoeffs(Array[Double](12, 5, 5, 5, 5, 5))
+    val examples: DataFrame = dataset
+      .map { (row: Row) =>
+        Instance(
+          label = row.getAs[Double]("label_strict"),
+          weight = 1.0,
+          features = Vectors.dense(row.getAs[Double]("x")))
+      }.toDF()
+    val model = trainer.fit(examples)
+
+    model.hasSummary should be(true)
+
+    println(s"Coefficients = " + model.coefficients.toArray.mkString(","))
+    println(s"Explained Variance = ${model.summary.explainedVariance}")
+    println(s"MSE = ${model.summary.meanSquaredError}")
+  }
 }
