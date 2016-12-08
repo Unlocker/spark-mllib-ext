@@ -1,24 +1,34 @@
 package org.apache.spark.ml.regression
 
 import breeze.linalg.DenseVector
+import org.apache.spark.SparkFunSuite
 import org.apache.spark.ml.feature.Instance
 import org.apache.spark.ml.linalg.Vectors
+import org.apache.spark.ml.util.DefaultReadWriteTest
 import org.apache.spark.mllib.util.MLlibTestSparkContext
 import org.apache.spark.sql.types.DataTypes._
 import org.apache.spark.sql.types.{StructField, StructType}
 import org.apache.spark.sql.{DataFrame, Row, SQLContext, SQLImplicits}
-import org.scalatest.{FlatSpec, Matchers}
 
 /**
   * Test suite for [[NonLinearRegression]].
   * It uses function f(x)=a1+a2*exp(-a3*(x-a0)**2)+a4*atan(a5*(x-a0))
   */
-class NonLinearRegressionTest extends FlatSpec with Matchers with MLlibTestSparkContext {
+class NonLinearRegressionTest extends SparkFunSuite with MLlibTestSparkContext with DefaultReadWriteTest {
+
+  /**
+    * Testing stuff to define DataFrame implicit conversions
+    */
+  private object testImplicits extends SQLImplicits {
+    protected override def _sqlContext: SQLContext = spark.sqlContext
+  }
+
+  import testImplicits._
 
   /**
     * Function f(x)=a1+a2*exp(-a3*(x-a0)**2)+a4*atan(a5*(x-a0))
     */
-  class SampleNonLinearFunction extends StubNonLinearFunction {
+  object SampleNonLinearFunction extends StubNonLinearFunction {
 
     override def eval(w: DenseVector[Double], x: DenseVector[Double]): Double = {
       val y = x(0) - w(0)
@@ -28,13 +38,9 @@ class NonLinearRegressionTest extends FlatSpec with Matchers with MLlibTestSpark
     override def dim: Int = 6
   }
 
-  private object testImplicits extends SQLImplicits {
-    protected override def _sqlContext: SQLContext = spark.sqlContext
-  }
-
-  import testImplicits._
-
   @transient var dataset: DataFrame = _
+
+  @transient var subject: NonLinearRegression = _
 
   override def beforeAll(): Unit = {
     super.beforeAll()
@@ -50,24 +56,43 @@ class NonLinearRegressionTest extends FlatSpec with Matchers with MLlibTestSpark
       .schema(schema)
       .option("header", value = true)
       .csv(getClass.getResource("/noised_nonlinear_function.csv").getFile)
+
+    subject = new NonLinearRegression(SampleNonLinearFunction)
+    subject.setInitCoeffs(Array[Double](22, 2, 2, 2, 2, 2))
   }
 
-  "Model" should "be fitted" in {
-    val trainer = new NonLinearRegression(new SampleNonLinearFunction)
-    trainer.setInitCoeffs(Array[Double](12, 5, 5, 5, 5, 5))
-    val examples: DataFrame = dataset
-      .map { (row: Row) =>
-        Instance(
-          label = row.getAs[Double]("label_strict"),
-          weight = 1.0,
-          features = Vectors.dense(row.getAs[Double]("x")))
-      }.toDF()
-    val model = trainer.fit(examples)
+  /**
+    * Strict labels produced as function value calculation with weights=(25, 1, 1, 1, 1, 1)
+    */
+  test("Model with strict labels should be fitted") {
+    assertModelCreation("label_strict", 0.01)
+  }
 
-    model.hasSummary should be(true)
+  /**
+    * Noised labels produced from the strict labels by adding random noise uniformly distributed in [-0.5, 0.5]
+    */
+  test("Model with noised labels should be fitted") {
+    assertModelCreation("label_noised", 0.05)
+  }
 
-    println(s"Coefficients = " + model.coefficients.toArray.mkString(","))
-    println(s"Explained Variance = ${model.summary.explainedVariance}")
-    println(s"MSE = ${model.summary.meanSquaredError}")
+  /**
+    * Asserts model retrieval from the regressor.
+    *
+    * @param labelColumn  column name with label
+    * @param mseThreshold MSE threshold
+    */
+  def assertModelCreation(labelColumn: String, mseThreshold: Double): Unit = {
+    val examples = dataset
+      .map { (row: Row) => Instance(row.getAs[Double](labelColumn), 1.0, Vectors.dense(row.getAs[Double]("x"))) }
+      .toDF()
+
+    val model = subject.fit(examples)
+
+    logWarning("COEFFS=[" + model.coefficients.toArray.mkString(",")
+      + s"]; EXPLAINED_VARIANCE=${model.summary.explainedVariance}; MSE=${model.summary.meanSquaredError}"
+    )
+
+    assert(model.hasSummary === true)
+    assert(model.summary.meanSquaredError < mseThreshold)
   }
 }
